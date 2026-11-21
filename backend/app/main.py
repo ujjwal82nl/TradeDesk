@@ -87,6 +87,7 @@ async def init_default_broker_accounts() -> None:
                 (BrokerName.ZERODHA, "Zerodha"),
                 (BrokerName.INDMONEY, "INDMoney"),
                 (BrokerName.IBKR, "Interactive Brokers"),
+                (BrokerName.COINDCX, "CoinDCX"),
             ]:
                 key = (name_enum.value if hasattr(name_enum, "value") else str(name_enum)).upper()
                 if key not in providers_map:
@@ -99,6 +100,32 @@ async def init_default_broker_accounts() -> None:
             users = res_users.scalars().all()
 
             for user in users:
+                # Dhan
+                if settings.DHAN_CLIENT_ID and "DHAN" in providers_map:
+                    d_prov = providers_map["DHAN"]
+                    res_acc = await session.execute(
+                        select(BrokerAccount).where(
+                            BrokerAccount.user_id == user.id,
+                            BrokerAccount.broker_id == d_prov.id,
+                        )
+                    )
+                    acc = res_acc.scalar_one_or_none()
+                    if not acc:
+                        acc = BrokerAccount(
+                            user_id=user.id,
+                            broker_id=d_prov.id,
+                            account_id=settings.DHAN_CLIENT_ID,
+                            account_name=f"Dhan ({settings.DHAN_CLIENT_ID})",
+                            is_active=True,
+                            is_default=True,
+                        )
+                        session.add(acc)
+                        log.info("Initialized Dhan account", user_id=user.id, account_id=settings.DHAN_CLIENT_ID)
+                    else:
+                        acc.account_id = settings.DHAN_CLIENT_ID
+                        acc.is_active = True
+
+                # Zerodha
                 if settings.ZERODHA_USER_ID and "ZERODHA" in providers_map:
                     z_prov = providers_map["ZERODHA"]
                     res_acc = await session.execute(
@@ -121,6 +148,55 @@ async def init_default_broker_accounts() -> None:
                         log.info("Initialized Zerodha account", user_id=user.id, account_id=settings.ZERODHA_USER_ID)
                     else:
                         acc.account_id = settings.ZERODHA_USER_ID
+                        acc.is_active = True
+
+                # INDMoney
+                if getattr(settings, "INDMONEY_CLIENT_ID", None) and "INDMONEY" in providers_map:
+                    i_prov = providers_map["INDMONEY"]
+                    res_acc = await session.execute(
+                        select(BrokerAccount).where(
+                            BrokerAccount.user_id == user.id,
+                            BrokerAccount.broker_id == i_prov.id,
+                        )
+                    )
+                    acc = res_acc.scalar_one_or_none()
+                    if not acc:
+                        acc = BrokerAccount(
+                            user_id=user.id,
+                            broker_id=i_prov.id,
+                            account_id=settings.INDMONEY_CLIENT_ID,
+                            account_name=f"INDMoney ({settings.INDMONEY_CLIENT_ID})",
+                            is_active=True,
+                            is_default=False,
+                        )
+                        session.add(acc)
+                        log.info("Initialized INDMoney account", user_id=user.id, account_id=settings.INDMONEY_CLIENT_ID)
+                    else:
+                        acc.account_id = settings.INDMONEY_CLIENT_ID
+                        acc.is_active = True
+
+                # CoinDCX
+                if getattr(settings, "COINDCX_API_KEY", None) and "COINDCX" in providers_map:
+                    c_prov = providers_map["COINDCX"]
+                    res_acc = await session.execute(
+                        select(BrokerAccount).where(
+                            BrokerAccount.user_id == user.id,
+                            BrokerAccount.broker_id == c_prov.id,
+                        )
+                    )
+                    acc = res_acc.scalar_one_or_none()
+                    if not acc:
+                        acc = BrokerAccount(
+                            user_id=user.id,
+                            broker_id=c_prov.id,
+                            account_id="COINDCX_MAIN",
+                            account_name="CoinDCX Crypto",
+                            is_active=True,
+                            is_default=False,
+                        )
+                        session.add(acc)
+                        log.info("Initialized CoinDCX account", user_id=user.id)
+                    else:
                         acc.is_active = True
 
             await session.commit()

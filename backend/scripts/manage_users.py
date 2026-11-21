@@ -93,12 +93,21 @@ async def reset_and_create_admin(email: str, password: str, name: str):
         print(f"Created fresh Admin account (ID 1): {email} ({name})\n")
 
 
+async def sync_brokers():
+    from app.main import init_default_broker_accounts
+    await init_default_broker_accounts()
+    print("Broker accounts synchronized from .env to active users!")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Manage TradeDesk users")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # list
     subparsers.add_parser("list", help="List all users")
+
+    # sync-brokers
+    subparsers.add_parser("sync-brokers", help="Sync broker accounts from .env to all users")
 
     # add
     add_parser = subparsers.add_parser("add", help="Add or update a user")
@@ -124,6 +133,8 @@ def main():
 
     if args.command == "list":
         asyncio.run(list_users())
+    elif args.command == "sync-brokers":
+        asyncio.run(sync_brokers())
     elif args.command == "add":
         if len(args.password) < 8:
             print("Error: Password must be at least 8 characters long.")
