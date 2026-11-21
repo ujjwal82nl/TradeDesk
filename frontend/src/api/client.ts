@@ -1,11 +1,23 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 
-const BASE_URL = process.env.REACT_APP_API_URL
-  ? `${process.env.REACT_APP_API_URL}/api/v1`
-  : 'http://localhost:8000/api/v1';
+const getBaseUrl = (): string => {
+  if (process.env.REACT_APP_API_URL) {
+    return `${process.env.REACT_APP_API_URL}/api/v1`;
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.pathname.startsWith('/opt')) {
+      return '/opt/api/v1';
+    }
+    if (window.location.port === '3000') {
+      return 'http://localhost:8000/api/v1';
+    }
+    return '/api/v1';
+  }
+  return 'http://localhost:8000/api/v1';
+};
 
 export const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: getBaseUrl(),
   headers: { 'Content-Type': 'application/json' },
   timeout: 30_000,
 });

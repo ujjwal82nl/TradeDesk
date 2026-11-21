@@ -44,10 +44,14 @@ export default function App() {
       return next;
     });
 
+  const basename =
+    process.env.PUBLIC_URL ||
+    (typeof window !== 'undefined' && window.location.pathname.startsWith('/opt') ? '/opt' : '');
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <React.Suspense fallback={null}>
           <Routes>
             <Route path="/login" element={<Login />} />
