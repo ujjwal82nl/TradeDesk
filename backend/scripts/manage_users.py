@@ -15,13 +15,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select, delete
-from app.db.session import async_session_factory
+from app.db.session import AsyncSessionLocal
 from app.models.user import User
 from app.core.security import get_password_hash
 
 
 async def list_users():
-    async with async_session_factory() as db:
+    async with AsyncSessionLocal() as db:
         res = await db.execute(select(User).order_by(User.id))
         users = res.scalars().all()
         if not users:
@@ -35,7 +35,7 @@ async def list_users():
 
 
 async def add_or_update_user(email: str, password: str, name: str, is_admin: bool):
-    async with async_session_factory() as db:
+    async with AsyncSessionLocal() as db:
         res = await db.execute(select(User).where(User.email == email))
         user = res.scalar_one_or_none()
         if user:
@@ -59,7 +59,7 @@ async def add_or_update_user(email: str, password: str, name: str, is_admin: boo
 
 
 async def delete_user(email: str):
-    async with async_session_factory() as db:
+    async with AsyncSessionLocal() as db:
         res = await db.execute(select(User).where(User.email == email))
         user = res.scalar_one_or_none()
         if not user:
@@ -71,7 +71,7 @@ async def delete_user(email: str):
 
 
 async def delete_defaults():
-    async with async_session_factory() as db:
+    async with AsyncSessionLocal() as db:
         res = await db.execute(delete(User).where(User.email.in_(["admin@trading.com", "admin@trading.local"])))
         await db.commit()
         print("Deleted demo accounts (admin@trading.com, admin@trading.local).")
