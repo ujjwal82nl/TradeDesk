@@ -64,7 +64,8 @@ services:
     container_name: trading_frontend
     restart: unless-stopped
     environment:
-      REACT_APP_API_URL: http://localhost:8000
+      PUBLIC_URL: /opt
+      REACT_APP_API_URL: /opt/api
     volumes:
       - ./frontend:/app
       - /app/node_modules
