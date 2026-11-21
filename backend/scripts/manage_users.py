@@ -14,7 +14,7 @@ from pathlib import Path
 # Add backend directory to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, text
 from app.db.session import AsyncSessionLocal
 from app.models.user import User
 from app.core.security import get_password_hash
@@ -77,6 +77,22 @@ async def delete_defaults():
         print("Deleted demo accounts (admin@trading.com, admin@trading.local).")
 
 
+async def reset_and_create_admin(email: str, password: str, name: str):
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("TRUNCATE TABLE users RESTART IDENTITY CASCADE;"))
+        user = User(
+            email=email,
+            hashed_password=get_password_hash(password),
+            full_name=name,
+            is_active=True,
+            is_superuser=True,
+        )
+        db.add(user)
+        await db.commit()
+        print(f"\nAll previous users successfully wiped!")
+        print(f"Created fresh Admin account (ID 1): {email} ({name})\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Manage TradeDesk users")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -90,6 +106,12 @@ def main():
     add_parser.add_argument("--password", required=True, help="Password (min 8 characters)")
     add_parser.add_argument("--name", default="Admin", help="Full name")
     add_parser.add_argument("--admin", action="store_true", default=True, help="Set as superuser / admin")
+
+    # reset
+    reset_parser = subparsers.add_parser("reset", help="Wipe all users and create a fresh admin user")
+    reset_parser.add_argument("--email", required=True, help="New admin email")
+    reset_parser.add_argument("--password", required=True, help="Password (min 8 characters)")
+    reset_parser.add_argument("--name", default="Admin", help="Full name")
 
     # delete
     del_parser = subparsers.add_parser("delete", help="Delete a specific user")
@@ -107,6 +129,11 @@ def main():
             print("Error: Password must be at least 8 characters long.")
             sys.exit(1)
         asyncio.run(add_or_update_user(args.email, args.password, args.name, args.admin))
+    elif args.command == "reset":
+        if len(args.password) < 8:
+            print("Error: Password must be at least 8 characters long.")
+            sys.exit(1)
+        asyncio.run(reset_and_create_admin(args.email, args.password, args.name))
     elif args.command == "delete":
         asyncio.run(delete_user(args.email))
     elif args.command == "delete-defaults":
