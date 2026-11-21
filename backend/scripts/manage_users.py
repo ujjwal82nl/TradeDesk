@@ -99,6 +99,19 @@ async def sync_brokers():
     print("Broker accounts synchronized from .env to active users!")
 
 
+async def test_dhan():
+    from app.core.config import settings
+    from app.brokers.adapters.dhan_adapter import request_dhan_access_token
+    print(f"Testing Dhan TOTP login for Client ID: {settings.DHAN_CLIENT_ID}...")
+    try:
+        token, expiry = request_dhan_access_token(
+            settings.DHAN_CLIENT_ID, settings.DHAN_PIN, settings.DHAN_TOTP_SECRET
+        )
+        print(f"SUCCESS: Generated Dhan Access Token (length: {len(token)}, expires: {expiry})")
+    except Exception as exc:
+        print(f"ERROR: {exc}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Manage TradeDesk users")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -108,6 +121,9 @@ def main():
 
     # sync-brokers
     subparsers.add_parser("sync-brokers", help="Sync broker accounts from .env to all users")
+
+    # test-dhan
+    subparsers.add_parser("test-dhan", help="Test Dhan TOTP login and token generation")
 
     # add
     add_parser = subparsers.add_parser("add", help="Add or update a user")
@@ -135,6 +151,8 @@ def main():
         asyncio.run(list_users())
     elif args.command == "sync-brokers":
         asyncio.run(sync_brokers())
+    elif args.command == "test-dhan":
+        asyncio.run(test_dhan())
     elif args.command == "add":
         if len(args.password) < 8:
             print("Error: Password must be at least 8 characters long.")

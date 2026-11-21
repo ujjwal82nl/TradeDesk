@@ -252,6 +252,13 @@ class BrokerService:
                 except Exception:
                     pass
 
+        # Dhan: auto-relogin via PIN + TOTP handles sessions
+        if "DHAN" in provider_name and settings.DHAN_PIN and settings.DHAN_TOTP_SECRET:
+            account.token_status = "ACTIVE"
+            account.is_token_expired = False
+            account.status_message = "Automated login active"
+            return
+
         # Zerodha: auto-relogin via TOTP/enctoken handles sessions
         if "ZERODHA" in provider_name and settings.ZERODHA_PASSWORD and settings.ZERODHA_TOTP_SECRET:
             account.token_status = "ACTIVE"
