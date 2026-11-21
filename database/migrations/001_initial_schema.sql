@@ -106,6 +106,10 @@ CREATE TABLE IF NOT EXISTS positions (
     strike_price        NUMERIC(15, 4),
     option_type         VARCHAR(5),               -- CE | PE
     lot_size            INTEGER NOT NULL DEFAULT 1,
+    delta               NUMERIC(15, 6),
+    gamma               NUMERIC(15, 8),
+    theta               NUMERIC(15, 6),
+    vega                NUMERIC(15, 6),
     last_updated        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_positions_account    ON positions(broker_account_id);
