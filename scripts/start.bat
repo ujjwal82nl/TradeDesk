@@ -5,7 +5,7 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0.."
 
 echo ===================================================
-echo   TradeDash - Starting Multi-Broker Platform
+echo   TradeDesk - Starting Multi-Broker Platform
 echo ===================================================
 
 if not exist ".env" (

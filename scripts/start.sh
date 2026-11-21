@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/.."
 
 echo "==================================================="
-echo "  TradeDash - Starting Multi-Broker Platform"
+echo "  TradeDesk - Starting Multi-Broker Platform"
 echo "==================================================="
 
 if [ ! -f ".env" ]; then
