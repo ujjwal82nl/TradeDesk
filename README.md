@@ -7,11 +7,12 @@
 ## 🌟 Key Features
 
 ### 1. Multi-Broker Unified Portfolio & Execution
-- **DhanHQ**: Holdings, open positions, orders, executed trades, funds, FIFO trade lot reconstruction, and automated TOTP 24-hour token refresh.
+- **DhanHQ**: Holdings, open positions, orders, executed trades, funds, FIFO trade lot reconstruction, and automated TOTP 24-hour token refresh (`DHAN_CLIENT_ID` + `DHAN_PIN` + `DHAN_TOTP_SECRET`).
 - **INDMoney (INDstocks)**: Indian equities and US stocks, trade lots, margin funds, and automated 24-hour token refresh via official API.
 - **Zerodha Kite**: Holdings, positions, orders, trades, and headless automated login.
 - **CoinDCX**: Crypto spot balances (with real-time USD/USDT to INR conversion), futures/derivatives, and options contracts with native & Black-Scholes Greeks (Delta, Gamma, Theta, Vega) and live INR valuation.
 - **Universal Dividend & Statement Importer**: Import statements (.csv and .xlsx OpenXML) from Dhan, Zerodha, Groww, Upstox, INDMoney, Angel One, and CAMS/KFintech CAS.
+- **Automated Broker Sync**: Automatically links Dhan, Zerodha, INDMoney, and CoinDCX accounts from `.env` to your admin user on startup.
 
 ### 2. URL & Navigation Hierarchy
 - **Reporting & Analytics (`/dashboard/*`)**:
@@ -274,7 +275,112 @@ apt install -y certbot python3-certbot-nginx
 certbot --nginx -d yourdomain.com
 ```
 
-### Step 6: Managing the VPS Application
+### Step 6: User & Admin Management CLI
+
+TradeDesk provides a dedicated administrative CLI tool inside the backend container to manage accounts securely without exposing public registration to the web.
+
+```bash
+# 1. Wipe demo accounts and create a fresh personal Admin user as ID 1
+sudo docker exec trading_backend python scripts/manage_users.py reset \
+  --email "your_email@example.com" \
+  --password "YourStrongPassword123!" \
+  --name "Your Name"
+
+# 2. List all users and verify access privileges
+sudo docker exec trading_backend python scripts/manage_users.py list
+
+# 3. Add or update another user
+sudo docker exec trading_backend python scripts/manage_users.py add \
+  --email "trader@example.com" \
+  --password "TraderPass123!" \
+  --name "Trader" \
+  --admin
+
+# 4. Delete demo accounts (admin@trading.com, admin@trading.local)
+sudo docker exec trading_backend python scripts/manage_users.py delete-defaults
+
+# 5. Automatically link broker accounts from .env to active users
+sudo docker exec trading_backend python scripts/manage_users.py sync-brokers
+
+# 6. Test Dhan automated TOTP login and 24-hr token generation
+sudo docker exec trading_backend python scripts/manage_users.py test-dhan
+```
+
+---
+
+### Step 7: Multi-Server Reverse Proxy (e.g. CloudPanel / Nginx under `/opt/`)
+
+If you host TradeDesk on a dedicated Docker server (e.g., `187.127.138.189`) and access it through an existing domain or panel on another server (e.g., `https://iamatwork.cloud/opt/*`), configure your upstream Vhost with high-priority prefix blocks (`^~`):
+
+```nginx
+# --- Redirect /opt to /opt/ if trailing slash is omitted ---
+location = /opt {
+    return 301 /opt/;
+}
+
+# --- TradeDesk Backend API (routes to Docker host) ---
+location ^~ /opt/api/ {
+    proxy_pass http://187.127.138.189:3080/opt/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+}
+
+# --- TradeDesk Frontend & Dashboard Routes ---
+location ^~ /opt/ {
+    proxy_pass http://187.127.138.189:3080/opt/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# --- Static Assets (JS / CSS / Media) ---
+location ^~ /static/ {
+    proxy_pass http://187.127.138.189:3080/static/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# --- WebSockets ---
+location /ws {
+    proxy_pass http://187.127.138.189:3080/ws;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+```
+
+> **Note on `^~`:** CloudPanel contains regular expression blocks for static assets (`.js`, `.css`, etc.). The `^~` modifier guarantees that requests under `/opt/` and `/static/` bypass host regexes and proxy directly to TradeDesk.
+
+---
+
+### Step 8: Database Migrations (Greeks & Options)
+
+If upgrading an existing database, ensure Black-Scholes Greeks columns are applied to the `positions` table:
+
+```bash
+sudo docker exec trading_db psql -U trading -d trading_platform -c "
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS delta NUMERIC(15, 6);
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS gamma NUMERIC(15, 8);
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS theta NUMERIC(15, 6);
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS vega NUMERIC(15, 6);
+"
+```
+
+---
+
+### Step 9: Managing the VPS Application
 
 ```bash
 # View live backend logs (including Telegram alert triggers)
