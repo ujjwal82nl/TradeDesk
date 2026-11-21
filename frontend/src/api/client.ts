@@ -1,19 +1,27 @@
 import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios';
 
 const getBaseUrl = (): string => {
-  if (process.env.REACT_APP_API_URL) {
-    return `${process.env.REACT_APP_API_URL}/api/v1`;
-  }
-  if (typeof window !== 'undefined') {
+  let base = process.env.REACT_APP_API_URL || '';
+  if (!base && typeof window !== 'undefined') {
     if (window.location.pathname.startsWith('/opt')) {
-      return '/opt/api/v1';
+      base = '/opt';
+    } else if (window.location.port === '3000') {
+      base = 'http://localhost:8000';
     }
-    if (window.location.port === '3000') {
-      return 'http://localhost:8000/api/v1';
-    }
-    return '/api/v1';
   }
-  return 'http://localhost:8000/api/v1';
+  if (!base) {
+    base = 'http://localhost:8000';
+  }
+
+  // Normalize: remove trailing slash, prevent duplicate /api
+  base = base.replace(/\/+$/, '');
+  if (base.endsWith('/api/v1')) {
+    return base;
+  }
+  if (base.endsWith('/api')) {
+    return `${base}/v1`;
+  }
+  return `${base}/api/v1`;
 };
 
 export const api = axios.create({
@@ -75,7 +83,7 @@ api.interceptors.response.use(
     isRefreshing = true;
     try {
       const { data } = await axios.post<{ access_token: string; refresh_token: string }>(
-        `${process.env.REACT_APP_API_URL ?? 'http://localhost:8000'}/api/v1/auth/refresh`,
+        `${getBaseUrl()}/auth/refresh`,
         { refresh_token: refreshToken },
       );
       localStorage.setItem('accessToken',  data.access_token);
