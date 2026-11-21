@@ -66,6 +66,7 @@ services:
     environment:
       PUBLIC_URL: /opt
       REACT_APP_API_URL: /opt/api
+      WDS_SOCKET_PORT: 443
     volumes:
       - ./frontend:/app
       - /app/node_modules
