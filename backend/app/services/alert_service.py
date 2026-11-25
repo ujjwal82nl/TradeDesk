@@ -100,8 +100,10 @@ class AlertService:
         resampled: List[Dict[str, Any]] = []
         n = len(raw_candles)
 
-        for i in range(0, n - chunk_size + 1, chunk_size):
+        for i in range(0, n, chunk_size):
             chunk = raw_candles[i : i + chunk_size]
+            if not chunk:
+                continue
             o_time = chunk[0][0]
             c_open = float(chunk[0][1])
             c_high = max(float(x[2]) for x in chunk)
@@ -305,8 +307,9 @@ class AlertService:
         st_value = float(calc["supertrend"])
         now = datetime.now(timezone.utc)
 
-        # Check if flipped
-        did_flip = (old_signal is not None and old_signal != new_signal) or calc["did_flip"]
+        # Check if flipped:
+        # A true flip ONLY occurs when transitioning between different states (e.g. RED -> GREEN or GREEN -> RED)
+        did_flip = (old_signal is not None and old_signal != new_signal)
 
         # Update rule state
         rule.current_spot = Decimal(str(spot_price))
@@ -318,14 +321,20 @@ class AlertService:
 
         if did_flip or force_notify:
             rule.last_flip_at = now
+            effective_old_signal = old_signal
+            if force_notify and not did_flip:
+                # If manually simulating a flip, show flip from opposite signal
+                effective_old_signal = "RED" if new_signal == "GREEN" else "GREEN"
+
             log.info(
                 "alert_signal_flip_detected",
                 rule_id=rule.id,
                 symbol=rule.symbol,
-                old_signal=old_signal,
+                old_signal=effective_old_signal,
                 new_signal=new_signal,
                 spot=spot_price,
                 st=st_value,
+                force_notify=force_notify,
             )
 
             if rule.notify_telegram:
@@ -333,7 +342,7 @@ class AlertService:
                 timeframe_label = f"{tf_mins} mins" if "m" in rule.timeframe else rule.timeframe
                 msg_text = TelegramService.format_supertrend_alert(
                     symbol=rule.symbol,
-                    old_signal=old_signal,
+                    old_signal=effective_old_signal,
                     new_signal=new_signal,
                     spot_price=spot_price,
                     indicator_value=st_value,
@@ -354,7 +363,7 @@ class AlertService:
                     user_id=rule.user_id,
                     symbol=rule.symbol,
                     event_type="SIGNAL_FLIP" if did_flip else "MANUAL_TEST",
-                    old_signal=old_signal,
+                    old_signal=effective_old_signal,
                     new_signal=new_signal,
                     spot_price=Decimal(str(spot_price)),
                     indicator_value=Decimal(str(st_value)),
