@@ -7,24 +7,45 @@ import { RootState } from './store';
 import MainLayout from './components/layout/MainLayout';
 import AlgoEngine from './pages/AlgoEngine';
 
+// Helper to auto-recover from stale chunks on new deployments
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  componentImport: () => Promise<{ default: T }>
+) {
+  return React.lazy(async () => {
+    const refreshed = window.sessionStorage.getItem('retry-chunk-refresh') === 'true';
+    try {
+      const component = await componentImport();
+      window.sessionStorage.setItem('retry-chunk-refresh', 'false');
+      return component;
+    } catch (error) {
+      if (!refreshed) {
+        window.sessionStorage.setItem('retry-chunk-refresh', 'true');
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw error;
+    }
+  });
+}
+
 // Lazy-loaded read-only / reporting pages
-const Portfolio    = React.lazy(() => import('./pages/Portfolio'));
-const Holdings     = React.lazy(() => import('./pages/Holdings'));
-const Positions    = React.lazy(() => import('./pages/Positions'));
-const Options      = React.lazy(() => import('./pages/Options'));
-const Strategies   = React.lazy(() => import('./pages/Strategies'));
-const Orders       = React.lazy(() => import('./pages/Orders'));
-const Trades       = React.lazy(() => import('./pages/Trades'));
-const Margin       = React.lazy(() => import('./pages/Margin'));
-const Dividends    = React.lazy(() => import('./pages/Dividends'));
-const Analytics    = React.lazy(() => import('./pages/Analytics'));
-const Brokers      = React.lazy(() => import('./pages/Brokers'));
-const Login        = React.lazy(() => import('./pages/Login'));
+const Portfolio    = lazyWithRetry(() => import('./pages/Portfolio'));
+const Holdings     = lazyWithRetry(() => import('./pages/Holdings'));
+const Positions    = lazyWithRetry(() => import('./pages/Positions'));
+const Options      = lazyWithRetry(() => import('./pages/Options'));
+const Strategies   = lazyWithRetry(() => import('./pages/Strategies'));
+const Orders       = lazyWithRetry(() => import('./pages/Orders'));
+const Trades       = lazyWithRetry(() => import('./pages/Trades'));
+const Margin       = lazyWithRetry(() => import('./pages/Margin'));
+const Dividends    = lazyWithRetry(() => import('./pages/Dividends'));
+const Analytics    = lazyWithRetry(() => import('./pages/Analytics'));
+const Brokers      = lazyWithRetry(() => import('./pages/Brokers'));
+const Login        = lazyWithRetry(() => import('./pages/Login'));
 
 // Lazy-loaded transactional / trading pages
-const Screener     = React.lazy(() => import('./pages/Trading/Screener'));
-const Signals      = React.lazy(() => import('./pages/Trading/Signals'));
-const OrderPad     = React.lazy(() => import('./pages/Trading/OrderPad'));
+const Screener     = lazyWithRetry(() => import('./pages/Trading/Screener'));
+const Signals      = lazyWithRetry(() => import('./pages/Trading/Signals'));
+const OrderPad     = lazyWithRetry(() => import('./pages/Trading/OrderPad'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useSelector((s: RootState) => s.auth.accessToken);
