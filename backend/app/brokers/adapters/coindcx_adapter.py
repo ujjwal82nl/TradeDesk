@@ -104,11 +104,18 @@ class CoinDCXAdapter(BaseBroker):
     # Authentication & Request Signing
     # ------------------------------------------------------------------
 
-    def _sign_payload(self, body: Optional[dict] = None) -> Tuple[str, str]:
-        """Sign request body using HMAC-SHA256 as required by CoinDCX."""
+    def _sign_payload(self, body: Optional[dict] = None, is_derivatives: bool = False) -> Tuple[str, str]:
+        """Sign request body using HMAC-SHA256 as required by CoinDCX.
+        
+        CoinDCX derivatives endpoints expect epoch timestamp in seconds,
+        while user balance / spot endpoints accept milliseconds.
+        """
         payload = dict(body or {})
         if "timestamp" not in payload:
-            payload["timestamp"] = int(round(time.time() * 1000))
+            if is_derivatives:
+                payload["timestamp"] = int(time.time())
+            else:
+                payload["timestamp"] = int(round(time.time() * 1000))
 
         # Compact JSON without spaces
         json_body = json.dumps(payload, separators=(",", ":"))
@@ -120,6 +127,22 @@ class CoinDCXAdapter(BaseBroker):
 
         return json_body, signature
 
+    @staticmethod
+    def _extract_list(data: Any) -> List[dict]:
+        """Safely extract list of items from diverse CoinDCX response shapes."""
+        if not data:
+            return []
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict):
+            for key in ("data", "positions", "result", "items"):
+                val = data.get(key)
+                if isinstance(val, list):
+                    return [x for x in val if isinstance(x, dict)]
+                if isinstance(val, dict) and isinstance(val.get("data"), list):
+                    return [x for x in val["data"] if isinstance(x, dict)]
+        return []
+
     async def _request(
         self,
         method: str,
@@ -128,6 +151,7 @@ class CoinDCXAdapter(BaseBroker):
         is_private: bool = True,
     ) -> Any:
         url = f"{self._base_url}{endpoint}"
+        is_derivatives = "/derivatives" in endpoint
 
         def _do_req():
             headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -136,7 +160,7 @@ class CoinDCXAdapter(BaseBroker):
                 if not (self._api_key and self._api_secret):
                     logger.warning("CoinDCX API Key/Secret missing for private endpoint: %s", endpoint)
                     return None
-                data, signature = self._sign_payload(body)
+                data, signature = self._sign_payload(body, is_derivatives=is_derivatives)
                 headers["X-AUTH-APIKEY"] = self._api_key
                 headers["X-AUTH-SIGNATURE"] = signature
 
@@ -158,7 +182,7 @@ class CoinDCXAdapter(BaseBroker):
                 logger.error("CoinDCX auth failed [%d]: %s", resp.status_code, resp.text[:200])
                 raise PermissionError("CoinDCX API Key or Secret rejected")
             if not resp.ok:
-                logger.warning("CoinDCX %s %s failed [%d]: %s", method, endpoint, resp.status_code, resp.text[:200])
+                logger.warning("CoinDCX %s %s failed [%d]: %s", method, endpoint, resp.status_code, resp.text[:300])
                 return None
             return resp.json()
         except Exception as exc:
@@ -262,13 +286,17 @@ class CoinDCXAdapter(BaseBroker):
         # Check futures margin / positions if applicable
         futures_used_margin = 0.0
         try:
-            positions_data = await self._request("POST", "/exchange/v1/derivatives/futures/positions", body={"page": "1", "size": "50"})
-            if isinstance(positions_data, list):
-                for pos in positions_data:
-                    m = _safe_float(pos.get("margin"))
-                    cur = pos.get("margin_currency_short_name", "USDT").upper()
-                    rate = usdt_inr if cur == "USDT" else 1.0
-                    futures_used_margin += m * rate
+            positions_data = await self._request(
+                "POST",
+                "/exchange/v1/derivatives/futures/positions",
+                body={"timestamp": int(time.time()), "page": "1", "size": "50"},
+            )
+            pos_list = self._extract_list(positions_data)
+            for pos in pos_list:
+                m = _safe_float(pos.get("margin"))
+                cur = (pos.get("margin_currency_short_name") or "USDT").upper()
+                rate = usdt_inr if cur == "USDT" else 1.0
+                futures_used_margin += m * rate
         except Exception:
             pass
 
@@ -369,66 +397,159 @@ class CoinDCXAdapter(BaseBroker):
     async def _fetch_futures_positions(
         self, tickers: Dict[str, float], usdt_inr: float
     ) -> List[PositionData]:
-        """Fetch open and intraday CoinDCX Futures positions."""
-        # Request both INR and USDT margin positions
-        data = await self._request(
-            "POST",
-            "/exchange/v1/derivatives/futures/positions",
-            body={
+        """Fetch open and intraday CoinDCX Futures positions.
+
+        Per CoinDCX API Reference (https://docs.coindcx.com/#list-positions):
+        POST https://api.coindcx.com/exchange/v1/derivatives/futures/positions
+        Payload:
+          timestamp: epoch in seconds
+          page: "1"
+          size: "50"
+          margin_currency_short_name: ["USDT"] or ["INR"]
+        """
+        async def _query_positions(margin_curr: Optional[str]) -> List[dict]:
+            body: Dict[str, Any] = {
+                "timestamp": int(time.time()),
                 "page": "1",
                 "size": "50",
-                "margin_currency_short_name": ["INR", "USDT"],
-            },
+            }
+            if margin_curr is not None:
+                body["margin_currency_short_name"] = [margin_curr]
+
+            data = await self._request(
+                "POST",
+                "/exchange/v1/derivatives/futures/positions",
+                body=body,
+            )
+            return self._extract_list(data)
+
+        # 1. Fetch both USDT and INR margin positions concurrently
+        usdt_res, inr_res = await asyncio.gather(
+            _query_positions("USDT"),
+            _query_positions("INR"),
+            return_exceptions=True,
         )
-        if not isinstance(data, list):
-            return []
+
+        all_raw_items: List[dict] = []
+        if isinstance(usdt_res, list):
+            all_raw_items.extend(usdt_res)
+        if isinstance(inr_res, list):
+            all_raw_items.extend(inr_res)
+
+        # 2. Fallback: if both returned empty, try querying without margin_currency_short_name
+        if not all_raw_items:
+            fallback_res = await _query_positions(None)
+            if isinstance(fallback_res, list):
+                all_raw_items.extend(fallback_res)
 
         positions: List[PositionData] = []
-        for item in data:
-            pair = item.get("pair") or item.get("market") or ""
-            active_units = _safe_float(
-                item.get("active_pos")
-                if item.get("active_pos") is not None
-                else (item.get("active_units") or item.get("quantity"))
-            )
+        seen_keys: set[str] = set()
+
+        for item in all_raw_items:
+            pair = (
+                item.get("pair")
+                or item.get("market")
+                or item.get("symbol")
+                or item.get("instrument")
+                or ""
+            ).strip()
+            if not pair:
+                continue
+
+            # Quantities
+            active_pos = _safe_float(item.get("active_pos"))
+            size = _safe_float(item.get("size"))
+            qty = _safe_float(item.get("quantity") or item.get("qty"))
             inactive_buy = _safe_float(item.get("inactive_pos_buy"))
             inactive_sell = _safe_float(item.get("inactive_pos_sell"))
 
-            avg_entry = _safe_float(item.get("avg_price") or item.get("avg_entry_price") or item.get("price"))
-            if active_units == 0 and inactive_buy == 0 and inactive_sell == 0 and avg_entry == 0:
+            side = (item.get("side") or "").lower()
+
+            # Determine net position quantity
+            if active_pos != 0.0:
+                net_qty = active_pos
+            elif size != 0.0:
+                net_qty = -size if side in ("sell", "short") else size
+            elif qty != 0.0:
+                net_qty = -qty if side in ("sell", "short") else qty
+            else:
+                net_qty = 0.0
+
+            # Average entry price
+            avg_entry = _safe_float(
+                item.get("entry_price")
+                or item.get("avg_price")
+                or item.get("avg_entry_price")
+                or item.get("price")
+            )
+
+            # Skip dormant / non-existent zero records that CoinDCX includes with 0s
+            if net_qty == 0.0 and avg_entry == 0.0 and inactive_buy == 0.0 and inactive_sell == 0.0:
                 continue
 
-            cur = item.get("margin_currency_short_name", "INR").upper()
+            pos_key = f"{pair}_{net_qty}_{avg_entry}"
+            if pos_key in seen_keys:
+                continue
+            seen_keys.add(pos_key)
+
+            # Currency & INR conversion
+            cur = (
+                item.get("margin_currency_short_name")
+                or item.get("margin_currency")
+                or item.get("settleCoin")
+                or item.get("currency")
+                or ("USDT" if "USDT" in pair.upper() else "INR")
+            ).upper()
             rate = usdt_inr if cur == "USDT" else 1.0
 
-            mark_price = _safe_float(item.get("mark_price") or item.get("last_price"))
+            # Mark / Current Price
+            mark_price = _safe_float(
+                item.get("mark_price")
+                or item.get("last_price")
+                or item.get("current_price")
+            )
             if mark_price == 0.0 and pair:
                 clean_pair = pair.replace("B-", "").replace("_", "").upper()
                 mark_price = _safe_float(tickers.get(clean_pair, 0.0))
 
-            unrealized_pnl = _safe_float(item.get("unrealized_pnl"))
-            if unrealized_pnl == 0.0 and active_units != 0 and mark_price > 0 and avg_entry > 0:
-                unrealized_pnl = (mark_price - avg_entry) * active_units
+            # Unrealized PnL
+            unrealized_pnl = _safe_float(
+                item.get("pnl")
+                if item.get("pnl") is not None
+                else (item.get("unrealized_pnl") or item.get("unrealised_pnl") or item.get("unrealized_profit"))
+            )
+            if unrealized_pnl == 0.0 and net_qty != 0.0 and mark_price > 0.0 and avg_entry > 0.0:
+                unrealized_pnl = (mark_price - avg_entry) * net_qty
+
+            # Realized / Day PnL
+            realized_pnl = _safe_float(
+                item.get("realized_pnl")
+                or item.get("realised_pnl")
+                or item.get("curRealisedPnl")
+                or item.get("day_pnl")
+            )
 
             entry_inr = avg_entry * rate
             mark_inr = mark_price * rate
             pnl_inr = unrealized_pnl * rate
+            day_pnl_inr = (realized_pnl * rate) if realized_pnl != 0.0 else pnl_inr
 
             positions.append(
                 PositionData(
                     symbol=pair,
                     exchange="COINDCX",
                     product_type="FUTURES",
-                    quantity=active_units,
-                    buy_qty=active_units if active_units > 0 else inactive_buy,
-                    sell_qty=abs(active_units) if active_units < 0 else inactive_sell,
+                    quantity=net_qty,
+                    buy_qty=net_qty if net_qty > 0 else inactive_buy,
+                    sell_qty=abs(net_qty) if net_qty < 0 else inactive_sell,
                     average_price=round(entry_inr, 2),
                     last_price=round(mark_inr, 2),
                     pnl=round(pnl_inr, 2),
-                    day_pnl=round(pnl_inr, 2),
+                    day_pnl=round(day_pnl_inr, 2),
                     instrument_type="FUT",
                 )
             )
+
         return positions
 
     async def _fetch_options_positions(self, usdt_inr: float) -> List[PositionData]:
