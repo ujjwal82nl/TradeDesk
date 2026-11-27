@@ -24,7 +24,10 @@ export default function Login() {
       dispatch(setCredentials({ ...data, user: me.data }));
       navigate('/dashboard');
     } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'Login failed. Check credentials.');
+      const msg = typeof e?.response?.data?.detail === 'string'
+        ? e.response.data.detail
+        : e?.message || 'Login failed. Check credentials.';
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -61,8 +64,16 @@ export default function Login() {
           <Button variant="contained" fullWidth size="large" onClick={handleLogin} disabled={loading}>
             {loading ? 'Signing in…' : 'Sign In'}
           </Button>
-          <Typography variant="caption" display="block" textAlign="center" mt={2} color="text.secondary">
-            Default: admin@trading.local / Admin@123
+          <Typography
+            variant="caption"
+            display="block"
+            textAlign="center"
+            mt={2}
+            color="text.secondary"
+            sx={{ cursor: 'pointer', '&:hover': { color: 'primary.main', textDecoration: 'underline' } }}
+            onClick={() => setForm({ email: 'admin@trading.com', password: 'Admin@123' })}
+          >
+            Click to autofill: admin@trading.com / Admin@123
           </Typography>
         </CardContent>
       </Card>

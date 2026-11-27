@@ -32,7 +32,7 @@ class UserRegisterRequest(BaseModel):
 class UserLoginRequest(BaseModel):
     """Payload for email/password login."""
 
-    email: EmailStr
+    email: str
     password: str
 
 

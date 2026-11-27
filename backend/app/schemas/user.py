@@ -50,7 +50,7 @@ class UserResponse(BaseModel):
 class LoginRequest(BaseModel):
     """Credentials payload for the login endpoint."""
 
-    email: EmailStr
+    email: str
     password: str
 
 

@@ -5,6 +5,7 @@ import { useSelector } from 'react-redux';
 import { createAppTheme } from './theme';
 import { RootState } from './store';
 import MainLayout from './components/layout/MainLayout';
+import AlgoEngine from './pages/AlgoEngine';
 
 // Lazy-loaded read-only / reporting pages
 const Portfolio    = React.lazy(() => import('./pages/Portfolio'));
@@ -17,7 +18,6 @@ const Trades       = React.lazy(() => import('./pages/Trades'));
 const Margin       = React.lazy(() => import('./pages/Margin'));
 const Dividends    = React.lazy(() => import('./pages/Dividends'));
 const Analytics    = React.lazy(() => import('./pages/Analytics'));
-const AlgoEngine   = React.lazy(() => import('./pages/AlgoEngine'));
 const Brokers      = React.lazy(() => import('./pages/Brokers'));
 const Login        = React.lazy(() => import('./pages/Login'));
 

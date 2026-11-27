@@ -295,6 +295,36 @@ PRESET_TEMPLATES: List[dict] = [
             {"leg_id": 4, "action": "BUY", "instrument_type": "CE", "strike_offset": 300, "lots": 1},
         ],
     },
+    {
+        "template_id": "0DTE_BTC_SELLING",
+        "title": "0DTE BTC Options Selling (Theta Gainers)",
+        "category": "Crypto Options Selling",
+        "description": "Sells 0DTE BTC Call and Put with premium closest to 100.00 at 09:00 IST. Enforces 100% stop loss on both legs and auto-squares off at 16:00 IST.",
+        "default_underlying": "BTC",
+        "default_product": "OPTIONS",
+        "entry_params": {
+            "entry_time": "09:00:00",
+            "no_entry_after": "10:00:00",
+            "strike_type": "PREMIUM",
+            "target_premium": 100.0,
+            "expiry_type": "0DTE",
+        },
+        "exit_params": {
+            "sl_type": "PERCENT",
+            "sl_value": 100.0,
+            "tp_type": "PERCENT",
+            "tp_value": 90.0,
+            "trailing_sl": False,
+            "trail_trigger": 0.0,
+            "trail_step": 0.0,
+            "squareoff_time": "16:00:00",
+            "max_daily_loss": 500.0,
+        },
+        "legs": [
+            {"leg_id": 1, "action": "SELL", "instrument_type": "CE", "strike_offset": 0, "lots": 1, "sl_pct": 100.0},
+            {"leg_id": 2, "action": "SELL", "instrument_type": "PE", "strike_offset": 0, "lots": 1, "sl_pct": 100.0},
+        ],
+    },
 ]
 
 
@@ -459,3 +489,42 @@ async def trigger_kill_switch(
         "message": f"Kill Switch activated for '{strat.name}'. Strategy marked inactive.",
         "strategy_id": strategy_id,
     }
+
+
+@router.get("/crypto/btc-0dte-chain")
+async def get_btc_0dte_chain(
+    target_premium: float = 100.0,
+    current_user: User = Depends(get_current_user),
+):
+    """Scan Delta / CoinDCX 0DTE BTC options and find closest Call and Put strikes to target premium."""
+    from app.services.algo_service import AlgoService
+    try:
+        data = await AlgoService.fetch_btc_0dte_options(target_premium=target_premium)
+        return {"success": True, "data": data}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/strategies/{strategy_id}/simulate-cycle")
+async def simulate_strategy_cycle(
+    strategy_id: int,
+    force_simulate: bool = True,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Simulate or execute a cycle of the strategy right now."""
+    from app.services.algo_service import AlgoService
+    result = await db.execute(
+        select(AlgoStrategy).where(
+            AlgoStrategy.id == strategy_id, AlgoStrategy.user_id == current_user.id
+        )
+    )
+    strat = result.scalar_one_or_none()
+    if not strat:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+
+    try:
+        res = await AlgoService.evaluate_btc_0dte_strategy(strat, db, force_simulate=force_simulate)
+        return {"success": True, "result": res}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))

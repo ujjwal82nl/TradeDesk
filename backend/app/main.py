@@ -28,15 +28,22 @@ async def lifespan(app: FastAPI):
     # Ensure broker providers and configured accounts exist
     await init_default_broker_accounts()
 
+    # Ensure default algo strategies exist
+    await init_default_algo_strategies()
+
     # Start background alert monitor worker (SuperTrend & Telegram signals)
     monitor_task = asyncio.create_task(alert_rules_background_worker())
+
+    # Start background algo execution worker (0DTE BTC Options & strategies)
+    algo_task = asyncio.create_task(algo_execution_background_worker())
 
     yield
 
     # Graceful shutdown
     monitor_task.cancel()
+    algo_task.cancel()
     try:
-        await monitor_task
+        await asyncio.gather(monitor_task, algo_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 
@@ -64,6 +71,85 @@ async def alert_rules_background_worker() -> None:
             await asyncio.sleep(60)
         except asyncio.CancelledError:
             break
+
+
+async def algo_execution_background_worker() -> None:
+    """Periodically check active algo strategies (every 60s) for time entries, SL triggers, and square-off."""
+    import asyncio
+    from app.db.session import AsyncSessionLocal
+    from app.services.algo_service import AlgoService
+
+    # Initial delay on boot
+    await asyncio.sleep(15)
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                await AlgoService.evaluate_all_active_strategies(session)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            log.warning("algo_worker_cycle_error", error=str(exc))
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            break
+
+
+async def init_default_algo_strategies() -> None:
+    """Seed default 0DTE BTC Options Selling strategy if not present."""
+    from sqlalchemy import select
+    from app.db.session import AsyncSessionLocal
+    from app.models.algo import AlgoStrategy
+    from app.models.user import User
+
+    try:
+        async with AsyncSessionLocal() as session:
+            res_users = await session.execute(select(User).where(User.is_active.is_(True)))
+            users = res_users.scalars().all()
+            for user in users:
+                res_strat = await session.execute(
+                    select(AlgoStrategy).where(
+                        AlgoStrategy.user_id == user.id,
+                        AlgoStrategy.name == "0DTE_BTC_Selling",
+                    )
+                )
+                existing = res_strat.scalar_one_or_none()
+                if not existing:
+                    new_strat = AlgoStrategy(
+                        user_id=user.id,
+                        name="0DTE_BTC_Selling",
+                        description="0DTE BTC Options short strangle based on Theta Gainers rule. Enters at 09:00 IST selling Call & Put closest to 100.00 premium with 100% stop loss on both sides, exiting at 16:00 IST.",
+                        template_type="0DTE_BTC_SELLING",
+                        underlying="BTC",
+                        is_active=True,
+                        mode="PAPER",
+                        product_type="OPTIONS",
+                        entry_params={
+                            "entry_time": "09:00:00",
+                            "no_entry_after": "10:00:00",
+                            "strike_type": "PREMIUM",
+                            "target_premium": 100.0,
+                            "expiry_type": "0DTE",
+                        },
+                        exit_params={
+                            "sl_type": "PERCENT",
+                            "sl_value": 100.0,
+                            "tp_type": "PERCENT",
+                            "tp_value": 90.0,
+                            "trailing_sl": False,
+                            "squareoff_time": "16:00:00",
+                            "max_daily_loss": 500.0,
+                        },
+                        legs=[
+                            {"leg_id": 1, "action": "SELL", "instrument_type": "CE", "target_premium": 100.0, "lots": 1, "sl_pct": 100.0},
+                            {"leg_id": 2, "action": "SELL", "instrument_type": "PE", "target_premium": 100.0, "lots": 1, "sl_pct": 100.0},
+                        ],
+                    )
+                    session.add(new_strat)
+                    await session.commit()
+                    log.info("default_btc_strategy_seeded", user_id=user.id)
+    except Exception as exc:
+        log.warning("failed_to_seed_default_btc_strategy", error=str(exc))
 
 
 async def init_default_broker_accounts() -> None:

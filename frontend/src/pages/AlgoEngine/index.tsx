@@ -54,6 +54,8 @@ import { formatBrokerAccountLabel } from '../../utils/formatters';
 // ---------------------------------------------------------------------------
 
 const UNDERLYING_OPTIONS = [
+  { value: 'BTC', label: 'BTC — Bitcoin (Crypto Options)', lotSize: 1 },
+  { value: 'ETH', label: 'ETH — Ethereum (Crypto Options)', lotSize: 1 },
   { value: 'NIFTY', label: 'NIFTY 50 (Index)', lotSize: 25 },
   { value: 'BANKNIFTY', label: 'BANK NIFTY (Index)', lotSize: 15 },
   { value: 'FINNIFTY', label: 'FIN NIFTY (Index)', lotSize: 25 },
@@ -91,6 +93,8 @@ export interface StrategyFormState {
     no_entry_after: string;
     strike_type: 'ATM' | 'OTM' | 'ITM' | 'PREMIUM';
     strike_offset: number;
+    target_premium?: number;
+    expiry_type?: string;
     spot_range_min?: number | '';
     spot_range_max?: number | '';
     indicator?: string;
@@ -150,21 +154,77 @@ const STATUS_COLOR: Record<string, any> = { RUNNING: 'success', STOPPED: 'defaul
 const MODE_COLOR: Record<string, any> = { PAPER: 'info', LIVE: 'error', BACKTEST: 'secondary' };
 
 const runCols: GridColDef[] = [
-  { field: 'name', headerName: 'Name', width: 200 },
-  { field: 'mode', headerName: 'Mode', width: 100, renderCell: p => <Chip size="small" label={p.value} color={MODE_COLOR[p.value] ?? 'default'} /> },
-  { field: 'status', headerName: 'Status', width: 110, renderCell: p => <Chip size="small" label={p.value} color={STATUS_COLOR[p.value] ?? 'default'} /> },
-  { field: 'started_at', headerName: 'Started', width: 180, renderCell: p => p.value ? new Date(p.value).toLocaleString('en-IN') : '—' },
-  { field: 'stopped_at', headerName: 'Stopped', width: 180, renderCell: p => p.value ? new Date(p.value).toLocaleString('en-IN') : '—' },
+  { field: 'name', headerName: 'Name', width: 220 },
+  { field: 'mode', headerName: 'Mode', width: 90, renderCell: p => <Chip size="small" label={p.value} color={MODE_COLOR[p.value] ?? 'default'} /> },
+  { field: 'status', headerName: 'Status', width: 100, renderCell: p => <Chip size="small" label={p.value} color={STATUS_COLOR[p.value] ?? 'default'} /> },
+  {
+    field: 'call_leg',
+    headerName: 'Call Leg (Sold)',
+    width: 180,
+    renderCell: p => {
+      const c = p.row.config?.call_leg;
+      if (!c) return '—';
+      return (
+        <Box>
+          <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', color: 'error.main' }}>
+            CE {c.strike ? `$${c.strike.toLocaleString()}` : ''} @ ${c.entry_price?.toFixed(1)}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            SL: ${c.sl_price?.toFixed(1)} ({c.status})
+          </Typography>
+        </Box>
+      );
+    },
+  },
+  {
+    field: 'put_leg',
+    headerName: 'Put Leg (Sold)',
+    width: 180,
+    renderCell: p => {
+      const put = p.row.config?.put_leg;
+      if (!put) return '—';
+      return (
+        <Box>
+          <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', color: 'error.main' }}>
+            PE {put.strike ? `$${put.strike.toLocaleString()}` : ''} @ ${put.entry_price?.toFixed(1)}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            SL: ${put.sl_price?.toFixed(1)} ({put.status})
+          </Typography>
+        </Box>
+      );
+    },
+  },
+  {
+    field: 'pnl',
+    headerName: 'Unrealized P&L',
+    width: 130,
+    renderCell: p => {
+      const pnl = p.row.config?.total_pnl ?? 0;
+      const isPos = pnl >= 0;
+      return (
+        <Typography variant="body2" sx={{ fontWeight: 800, color: isPos ? 'success.main' : 'error.main' }}>
+          {isPos ? '+' : ''}${pnl.toFixed(2)}
+        </Typography>
+      );
+    },
+  },
+  { field: 'started_at', headerName: 'Started', width: 160, renderCell: p => p.value ? new Date(p.value).toLocaleString('en-IN') : '—' },
+  { field: 'stopped_at', headerName: 'Stopped', width: 160, renderCell: p => p.value ? new Date(p.value).toLocaleString('en-IN') : '—' },
 ];
 
 const signalCols: GridColDef[] = [
-  { field: 'created_at', headerName: 'Time', width: 180, renderCell: p => new Date(p.value).toLocaleString('en-IN') },
-  { field: 'symbol', headerName: 'Symbol', width: 140, renderCell: p => <strong>{p.value}</strong> },
+  { field: 'created_at', headerName: 'Time', width: 170, renderCell: p => new Date(p.value).toLocaleString('en-IN') },
+  { field: 'symbol', headerName: 'Symbol', width: 180, renderCell: p => <strong>{p.value}</strong> },
   { field: 'signal_type', headerName: 'Signal', width: 100, renderCell: p => <Chip size="small" label={p.value} color={p.value === 'BUY' ? 'success' : p.value === 'SELL' ? 'error' : 'default'} /> },
-  { field: 'price', headerName: 'Price', width: 110, renderCell: p => `₹${p.value}` },
-  { field: 'quantity', headerName: 'Qty', width: 90 },
-  { field: 'strategy_name', headerName: 'Strategy', width: 180 },
+  { field: 'price', headerName: 'Price', width: 110, renderCell: p => {
+      const isCrypto = p.row.symbol?.includes('BTC') || p.row.exchange === 'COINDCX';
+      return isCrypto ? `$${p.value}` : `₹${p.value}`;
+  } },
+  { field: 'quantity', headerName: 'Qty', width: 80 },
+  { field: 'strategy_name', headerName: 'Strategy', width: 160 },
   { field: 'executed', headerName: 'Executed', width: 100, renderCell: p => <Chip size="small" label={p.value ? 'Executed' : 'Pending'} color={p.value ? 'success' : 'default'} /> },
+  { field: 'notes', headerName: 'Rules / Stop Loss Info', width: 340 },
 ];
 
 // ---------------------------------------------------------------------------
@@ -217,6 +277,7 @@ export default function AlgoEngine() {
   // Delete & Kill Switch Dialog states
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [killDialogOpen, setKillDialogOpen] = useState(false);
+  const [selectedRunDetails, setSelectedRunDetails] = useState<any>(null);
 
   // Auto-select broker if available
   useEffect(() => {
@@ -332,6 +393,20 @@ export default function AlgoEngine() {
         message: resp.data.message || 'Kill switch activated! Strategy stopped.',
         severity: 'warning',
       });
+    },
+  });
+
+  const simulateMutation = useMutation({
+    mutationFn: async (id: number) => api.post(`/algo/strategies/${id}/simulate-cycle?force_simulate=true`),
+    onSuccess: (resp: any) => {
+      qc.invalidateQueries({ queryKey: ['algo-strategies'] });
+      qc.invalidateQueries({ queryKey: ['algo-runs'] });
+      qc.invalidateQueries({ queryKey: ['algo-signals'] });
+      const msg = resp.data?.result?.message || 'Cycle executed successfully!';
+      setSnack({ open: true, message: msg, severity: 'success' });
+    },
+    onError: (err: any) => {
+      setSnack({ open: true, message: err.response?.data?.detail || err.message, severity: 'error' });
     },
   });
 
@@ -492,6 +567,19 @@ export default function AlgoEngine() {
                 </Button>
               )}
 
+              {form.id && (
+                <Button
+                  variant="outlined"
+                  color="warning"
+                  size="small"
+                  startIcon={<AutoModeIcon />}
+                  onClick={() => simulateMutation.mutate(form.id!)}
+                  disabled={simulateMutation.isPending}
+                >
+                  {simulateMutation.isPending ? 'Simulating...' : 'Test Cycle Live'}
+                </Button>
+              )}
+
               <Button
                 variant="contained"
                 size="small"
@@ -644,6 +732,11 @@ export default function AlgoEngine() {
                                 {opt.label}
                               </MenuItem>
                             ))}
+                            {UNDERLYING_OPTIONS.every(opt => opt.value !== form.underlying) && Boolean(form.underlying) && (
+                              <MenuItem value={form.underlying}>
+                                {form.underlying}
+                              </MenuItem>
+                            )}
                           </Select>
                         </FormControl>
                       </Grid>
@@ -651,11 +744,11 @@ export default function AlgoEngine() {
                       <Grid item xs={12} sm={4}>
                         <TextField
                           label="Expiry Preference"
-                          value="Current Weekly"
+                          value={form.underlying === 'BTC' || form.underlying === 'ETH' ? '0DTE (Same Day Expiry)' : 'Current Weekly'}
                           size="small"
                           fullWidth
                           disabled
-                          helperText="Auto-selects current expiry"
+                          helperText={form.underlying === 'BTC' || form.underlying === 'ETH' ? 'Daily 17:30 IST settlement' : 'Auto-selects current expiry'}
                         />
                       </Grid>
                     </Grid>
@@ -719,23 +812,39 @@ export default function AlgoEngine() {
                           <MenuItem value="ATM">ATM (At The Money)</MenuItem>
                           <MenuItem value="OTM">OTM (Out of The Money)</MenuItem>
                           <MenuItem value="ITM">ITM (In The Money)</MenuItem>
+                          <MenuItem value="PREMIUM">PREMIUM (Closest to Target Price, e.g. 100)</MenuItem>
                         </Select>
                       </FormControl>
                     </Grid>
 
                     <Grid item xs={12} sm={6}>
-                      <TextField
-                        label="Strike Offset (Points)"
-                        type="number"
-                        value={form.entry_params.strike_offset}
-                        onChange={e => setForm(f => ({
-                          ...f,
-                          entry_params: { ...f.entry_params, strike_offset: Number(e.target.value) },
-                        }))}
-                        size="small"
-                        fullWidth
-                        helperText="E.g. 0 for ATM, +100 for OTM, -100 for ITM"
-                      />
+                      {form.entry_params.strike_type === 'PREMIUM' ? (
+                        <TextField
+                          label="Target Premium ($ or ₹)"
+                          type="number"
+                          value={form.entry_params.target_premium ?? 100}
+                          onChange={e => setForm(f => ({
+                            ...f,
+                            entry_params: { ...f.entry_params, target_premium: Number(e.target.value) },
+                          }))}
+                          size="small"
+                          fullWidth
+                          helperText="Selects Call & Put options closest to this premium (e.g. 100.00)"
+                        />
+                      ) : (
+                        <TextField
+                          label="Strike Offset (Points)"
+                          type="number"
+                          value={form.entry_params.strike_offset}
+                          onChange={e => setForm(f => ({
+                            ...f,
+                            entry_params: { ...f.entry_params, strike_offset: Number(e.target.value) },
+                          }))}
+                          size="small"
+                          fullWidth
+                          helperText="E.g. 0 for ATM, +100 for OTM, -100 for ITM"
+                        />
+                      )}
                     </Grid>
                   </Grid>
                 </CardContent>
@@ -1007,18 +1116,31 @@ export default function AlgoEngine() {
               {
                 field: 'actions',
                 headerName: 'Actions',
-                width: 120,
-                renderCell: p =>
-                  p.row.status === 'RUNNING' ? (
-                    <Button
-                      size="small"
-                      color="error"
-                      startIcon={<StopIcon />}
-                      onClick={() => stopRunMutation.mutate(p.row.id)}
-                    >
-                      Stop
-                    </Button>
-                  ) : null,
+                width: 190,
+                renderCell: p => (
+                  <Box display="flex" alignItems="center" gap={1}>
+                    {p.row.config?.call_leg && (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="info"
+                        onClick={() => setSelectedRunDetails(p.row)}
+                      >
+                        View Legs
+                      </Button>
+                    )}
+                    {p.row.status === 'RUNNING' && (
+                      <Button
+                        size="small"
+                        color="error"
+                        startIcon={<StopIcon />}
+                        onClick={() => stopRunMutation.mutate(p.row.id)}
+                      >
+                        Stop
+                      </Button>
+                    )}
+                  </Box>
+                ),
               },
             ]}
             loading={loadRuns}
@@ -1095,6 +1217,168 @@ export default function AlgoEngine() {
           >
             {killSwitchMutation.isPending ? 'Executing Kill Switch...' : 'Execute Emergency Kill Switch'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Run Legs & PnL Inspection Dialog */}
+      <Dialog
+        open={Boolean(selectedRunDetails)}
+        onClose={() => setSelectedRunDetails(null)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          📊 Run Inspection: {selectedRunDetails?.name}
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedRunDetails && (
+            <Box display="flex" flexDirection="column" gap={2}>
+              <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">EXPIRY DATE (0DTE)</Typography>
+                  <Typography variant="body1" fontWeight={700}>
+                    {selectedRunDetails.config?.expiry_ist || 'Today 17:30 IST'}
+                  </Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">TARGET SQUARE-OFF</Typography>
+                  <Typography variant="body1" fontWeight={700}>16:00:00 IST</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="caption" color="text.secondary">NET STRATEGY P&L</Typography>
+                  <Typography
+                    variant="h6"
+                    fontWeight={800}
+                    color={(selectedRunDetails.config?.total_pnl ?? 0) >= 0 ? 'success.main' : 'error.main'}
+                  >
+                    {(selectedRunDetails.config?.total_pnl ?? 0) >= 0 ? '+' : ''}
+                    ${(selectedRunDetails.config?.total_pnl ?? 0).toFixed(2)}
+                  </Typography>
+                </Box>
+              </Box>
+
+              <Grid container spacing={2} mt={0.5}>
+                {/* Call Leg Card */}
+                {selectedRunDetails.config?.call_leg && (
+                  <Grid item xs={12} sm={6}>
+                    <Card variant="outlined" sx={{ borderRadius: 2, bgcolor: 'background.default' }}>
+                      <CardContent>
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                          <Chip label="CALL LEG (CE)" color="error" size="small" sx={{ fontWeight: 700 }} />
+                          <Chip
+                            label={selectedRunDetails.config.call_leg.status}
+                            color={selectedRunDetails.config.call_leg.status === 'OPEN' ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </Box>
+                        <Typography variant="subtitle1" fontWeight={800} mb={1}>
+                          {selectedRunDetails.config.call_leg.symbol}
+                        </Typography>
+                        <Box display="flex" flexDirection="column" gap={0.5}>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="text.secondary">Strike Price:</Typography>
+                            <Typography variant="body2" fontWeight={700}>
+                              ${selectedRunDetails.config.call_leg.strike?.toLocaleString()}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="text.secondary">Entry Sold Price:</Typography>
+                            <Typography variant="body2" fontWeight={700}>
+                              ${selectedRunDetails.config.call_leg.entry_price?.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="text.secondary">Current Price:</Typography>
+                            <Typography variant="body2" fontWeight={700}>
+                              ${selectedRunDetails.config.call_leg.current_price?.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="error.main">100% Stop Loss Level:</Typography>
+                            <Typography variant="body2" fontWeight={800} color="error.main">
+                              ${selectedRunDetails.config.call_leg.sl_price?.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between" pt={1} borderTop="1px solid" borderColor="divider">
+                            <Typography variant="body2" fontWeight={700}>Leg P&L:</Typography>
+                            <Typography
+                              variant="body2"
+                              fontWeight={800}
+                              color={(selectedRunDetails.config.call_leg.pnl ?? 0) >= 0 ? 'success.main' : 'error.main'}
+                            >
+                              {(selectedRunDetails.config.call_leg.pnl ?? 0) >= 0 ? '+' : ''}
+                              ${(selectedRunDetails.config.call_leg.pnl ?? 0).toFixed(2)}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                )}
+
+                {/* Put Leg Card */}
+                {selectedRunDetails.config?.put_leg && (
+                  <Grid item xs={12} sm={6}>
+                    <Card variant="outlined" sx={{ borderRadius: 2, bgcolor: 'background.default' }}>
+                      <CardContent>
+                        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                          <Chip label="PUT LEG (PE)" color="error" size="small" sx={{ fontWeight: 700 }} />
+                          <Chip
+                            label={selectedRunDetails.config.put_leg.status}
+                            color={selectedRunDetails.config.put_leg.status === 'OPEN' ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </Box>
+                        <Typography variant="subtitle1" fontWeight={800} mb={1}>
+                          {selectedRunDetails.config.put_leg.symbol}
+                        </Typography>
+                        <Box display="flex" flexDirection="column" gap={0.5}>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="text.secondary">Strike Price:</Typography>
+                            <Typography variant="body2" fontWeight={700}>
+                              ${selectedRunDetails.config.put_leg.strike?.toLocaleString()}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="text.secondary">Entry Sold Price:</Typography>
+                            <Typography variant="body2" fontWeight={700}>
+                              ${selectedRunDetails.config.put_leg.entry_price?.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="text.secondary">Current Price:</Typography>
+                            <Typography variant="body2" fontWeight={700}>
+                              ${selectedRunDetails.config.put_leg.current_price?.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between">
+                            <Typography variant="body2" color="error.main">100% Stop Loss Level:</Typography>
+                            <Typography variant="body2" fontWeight={800} color="error.main">
+                              ${selectedRunDetails.config.put_leg.sl_price?.toFixed(2)}
+                            </Typography>
+                          </Box>
+                          <Box display="flex" justifyContent="space-between" pt={1} borderTop="1px solid" borderColor="divider">
+                            <Typography variant="body2" fontWeight={700}>Leg P&L:</Typography>
+                            <Typography
+                              variant="body2"
+                              fontWeight={800}
+                              color={(selectedRunDetails.config.put_leg.pnl ?? 0) >= 0 ? 'success.main' : 'error.main'}
+                            >
+                              {(selectedRunDetails.config.put_leg.pnl ?? 0) >= 0 ? '+' : ''}
+                              ${(selectedRunDetails.config.put_leg.pnl ?? 0).toFixed(2)}
+                            </Typography>
+                          </Box>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                )}
+              </Grid>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSelectedRunDetails(null)}>Close</Button>
         </DialogActions>
       </Dialog>
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     JSON,
     Numeric,
     String,
@@ -42,6 +43,7 @@ class AlgoStatus(str, enum.Enum):
     RUNNING = "RUNNING"
     STOPPED = "STOPPED"
     ERROR = "ERROR"
+    COMPLETED = "COMPLETED"
 
 
 class AlgoMode(str, enum.Enum):
@@ -58,6 +60,7 @@ class SignalType(str, enum.Enum):
     BUY = "BUY"
     SELL = "SELL"
     EXIT = "EXIT"
+    HOLD = "HOLD"
 
 
 # ---------------------------------------------------------------------------
@@ -90,12 +93,12 @@ class AlgoRun(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     strategy_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[AlgoStatus] = mapped_column(
-        Enum(AlgoStatus, name="algostatus"),
+        Enum(AlgoStatus, name="algo_status_enum", create_type=False),
         nullable=False,
         default=AlgoStatus.STOPPED,
     )
     mode: Mapped[AlgoMode] = mapped_column(
-        Enum(AlgoMode, name="algomode"),
+        Enum(AlgoMode, name="algo_mode_enum", create_type=False),
         nullable=False,
         default=AlgoMode.PAPER,
     )
@@ -144,10 +147,10 @@ class TradeSignal(Base):
     symbol: Mapped[str] = mapped_column(String(100), nullable=False)
     exchange: Mapped[str] = mapped_column(String(20), nullable=False)
     signal_type: Mapped[SignalType] = mapped_column(
-        Enum(SignalType, name="signaltype"), nullable=False
+        Enum(SignalType, name="signal_type_enum", create_type=False), nullable=False
     )
     price: Mapped[money]
-    quantity: Mapped[int] = mapped_column(Numeric(18, 4), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     strategy_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     confidence_score: Mapped[Decimal | None] = mapped_column(
         Numeric(5, 4), nullable=True, comment="Float in [0, 1]"
