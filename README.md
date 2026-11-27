@@ -10,7 +10,7 @@
 - **DhanHQ**: Holdings, open positions, orders, executed trades, funds, FIFO trade lot reconstruction, and automated TOTP 24-hour token refresh (`DHAN_CLIENT_ID` + `DHAN_PIN` + `DHAN_TOTP_SECRET`).
 - **INDMoney (INDstocks)**: Indian equities and US stocks, trade lots, margin funds, and automated 24-hour token refresh via official API.
 - **Zerodha Kite**: Holdings, positions, orders, trades, and headless automated login.
-- **CoinDCX**: Crypto spot balances (with real-time USD/USDT to INR conversion), futures/derivatives, and options contracts with native & Black-Scholes Greeks (Delta, Gamma, Theta, Vega) and live INR valuation.
+- **CoinDCX**: Crypto spot balances (with real-time USD/USDT to INR conversion), futures/derivatives, and options contracts with native & Black-Scholes Greeks (Delta, Gamma, Theta, Vega), automatic INR/USDT settlement detection, and live INR valuation. Supports API key/secret and Bearer auth (`COINDCX_AUTH_TOKEN`).
 - **Universal Dividend & Statement Importer**: Import statements (.csv and .xlsx OpenXML) from Dhan, Zerodha, Groww, Upstox, INDMoney, Angel One, and CAMS/KFintech CAS.
 - **Automated Broker Sync**: Automatically links Dhan, Zerodha, INDMoney, and CoinDCX accounts from `.env` to your admin user on startup.
 

@@ -586,41 +586,63 @@ class CoinDCXAdapter(BaseBroker):
                 return []
 
             res_json = resp.json()
-            raw_items = res_json.get("data", {}).get("data", [])
+            raw_items = self._extract_list(res_json)
+            if not raw_items and isinstance(res_json, dict):
+                # Try nested data.data
+                raw_items = res_json.get("data", {}).get("data", [])
             if not isinstance(raw_items, list):
                 return []
 
             options: List[PositionData] = []
             for item in raw_items:
-                inst = item.get("instrumentDetails", {})
-                disp_name = inst.get("displayName") or item.get("symbol", "")
+                inst = item.get("instrumentDetails") or item.get("instrument_details") or {}
+                disp_name = (
+                    inst.get("displayName")
+                    or item.get("displayName")
+                    or item.get("symbol")
+                    or item.get("name")
+                    or item.get("pair")
+                    or ""
+                ).strip()
                 if not disp_name:
                     continue
 
-                side = (item.get("side") or "BUY").upper()
-                size = _safe_float(item.get("size"))
+                side = (item.get("side") or item.get("direction") or "BUY").upper()
+                size = _safe_float(item.get("size") if item.get("size") is not None else item.get("quantity") or item.get("active_pos") or item.get("lots"))
                 if size == 0.0:
                     continue
 
-                net_qty = -size if side == "SELL" else size
-                settle = (inst.get("settleCoin") or "USDT").upper()
-                rate = usdt_inr if settle == "USDT" else 1.0
+                net_qty = -abs(size) if side in ("SELL", "SHORT") else abs(size)
+                settle = (inst.get("settleCoin") or item.get("settleCoin") or item.get("currency") or "INR" if "INR" in disp_name else "USDT").upper()
+                # If values are already in INR (like in the CoinDCX web UI), rate is 1.0
+                rate = 1.0 if settle == "INR" else usdt_inr
 
-                avg_price_raw = _safe_float(item.get("avgPrice"))
-                mark_price_raw = _safe_float(item.get("markPrice"))
-                unrealised_pnl_raw = _safe_float(item.get("unrealisedPnl"))
-                cur_realised_pnl_raw = _safe_float(item.get("curRealisedPnl"))
+                avg_price_raw = _safe_float(item.get("avgPrice") or item.get("entryPrice") or item.get("entry_price") or item.get("avg_price"))
+                mark_price_raw = _safe_float(item.get("markPrice") or item.get("mark_price") or item.get("last_price"))
+                unrealised_pnl_raw = _safe_float(item.get("unrealisedPnl") or item.get("pnl") or item.get("activePnl") or item.get("unrealized_pnl"))
+                cur_realised_pnl_raw = _safe_float(item.get("curRealisedPnl") or item.get("realized_pnl"))
 
                 avg_price = avg_price_raw * rate
                 last_price = mark_price_raw * rate
                 pnl = unrealised_pnl_raw * rate
                 day_pnl = cur_realised_pnl_raw * rate if cur_realised_pnl_raw != 0.0 else pnl
 
-                opt_type_raw = inst.get("optionsType", "")
-                option_type = "CE" if "call" in opt_type_raw.lower() else "PE"
-                strike_price = _safe_float(inst.get("strikePrice"))
+                opt_type_raw = str(inst.get("optionsType") or item.get("optionsType") or item.get("option_type") or "").lower()
+                if "call" in opt_type_raw or disp_name.endswith("-C") or disp_name.endswith("CE"):
+                    option_type = "CE"
+                else:
+                    option_type = "PE"
 
-                expiry_ms = inst.get("expiryTime")
+                strike_price = _safe_float(inst.get("strikePrice") or item.get("strikePrice") or item.get("strike_price"))
+                if strike_price == 0.0 and "-" in disp_name:
+                    # Parse strike from e.g. BTC-25DEC26-60000-C
+                    parts = disp_name.split("-")
+                    for p_part in parts:
+                        if p_part.isdigit() and float(p_part) > 100:
+                            strike_price = float(p_part)
+                            break
+
+                expiry_ms = inst.get("expiryTime") or item.get("expiryTime") or item.get("expiry_time")
                 expiry_dt: Optional[datetime] = None
                 if expiry_ms:
                     try:
@@ -639,8 +661,8 @@ class CoinDCXAdapter(BaseBroker):
                         exchange="COINDCX",
                         product_type="OPTIONS",
                         quantity=net_qty,
-                        buy_qty=size if side != "SELL" else 0.0,
-                        sell_qty=size if side == "SELL" else 0.0,
+                        buy_qty=size if side not in ("SELL", "SHORT") else 0.0,
+                        sell_qty=size if side in ("SELL", "SHORT") else 0.0,
                         average_price=round(avg_price, 2),
                         last_price=round(last_price, 2),
                         pnl=round(pnl, 2),

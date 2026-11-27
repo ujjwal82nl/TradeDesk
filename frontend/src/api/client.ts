@@ -106,7 +106,8 @@ function clearAuthAndRedirect() {
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
   localStorage.removeItem('user');
-  window.location.href = '/login';
+  const isOpt = typeof window !== 'undefined' && window.location.pathname.startsWith('/opt');
+  window.location.href = isOpt ? '/opt/login' : '/login';
 }
 
 function buildReadableError(error: AxiosError | unknown): Error {

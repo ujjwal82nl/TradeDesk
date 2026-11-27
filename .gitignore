@@ -13,6 +13,7 @@ frontend/.env.production.local
 backend/.cache/
 *.token
 *.jwt
+scratch/
 
 # Personal statement files & trade reports
 *.csv

@@ -45,8 +45,9 @@ export default function App() {
     });
 
   const basename =
-    process.env.PUBLIC_URL ||
-    (typeof window !== 'undefined' && window.location.pathname.startsWith('/opt') ? '/opt' : '');
+    typeof window !== 'undefined' && window.location.pathname.startsWith('/opt')
+      ? '/opt'
+      : '';
 
   return (
     <ThemeProvider theme={theme}>

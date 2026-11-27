@@ -85,6 +85,10 @@ def _load_adapter(provider_slug: Any, account: BrokerAccount) -> Any:
             credentials["api_key"] = settings.COINDCX_API_KEY
         if settings.COINDCX_API_SECRET:
             credentials["api_secret"] = settings.COINDCX_API_SECRET
+        if settings.COINDCX_AUTH_TOKEN:
+            credentials["access_token"] = settings.COINDCX_AUTH_TOKEN
+            if account.access_token != settings.COINDCX_AUTH_TOKEN:
+                account.access_token = settings.COINDCX_AUTH_TOKEN
 
     adapter = factory.create(slug, credentials)
 
